@@ -42,6 +42,6 @@ app.get('/api/songs', (req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`🎵 Spotify Clone running on http://localhost:${PORT}`);
+    console.log(`🎵 SoundWave running on http://localhost:${PORT}`);
     console.log(`📁 Place your MP3 files in the 'music/' folder`);
 });

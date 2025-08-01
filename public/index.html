@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Spotify</title>
+    <title>SoundWave</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
@@ -562,7 +562,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🎵 Mi Spotify</h1>
+            <h1>🎵 SoundWave</h1>
             <p>Reproduce tu música favorita</p>
         </div>
 
@@ -579,6 +579,9 @@
             <button class="btn" id="shuffleBtn">
                 🔀 Aleatorio
             </button>
+            <button class="btn" id="repeatBtn">
+                🔁 Repetir
+            </button>
             <button class="btn" id="refreshBtn">
                 🔄 Actualizar
             </button>
@@ -589,7 +592,10 @@
         </div>
 
         <div class="playlist">
-            <h2>Lista de Reproducción</h2>
+            <h2>
+                Lista de Reproducción
+                <input type="text" id="searchInput" placeholder="Buscar canción..." style="margin-left:16px; border-radius:12px; border:none; padding:8px 14px; font-size:1rem; background:var(--bg-tertiary); color:var(--text-primary); min-width:180px; outline:none;">
+            </h2>
             <div id="loadingMessage" class="loading">
                 Cargando canciones...
             </div>
@@ -620,21 +626,24 @@
     <audio id="audioPlayer" preload="metadata"></audio>
 
     <script>
-        class SpotifyClone {
+        class SoundWave {
             constructor() {
                 this.songs = [];
+                this.filteredSongs = [];
                 this.currentSongIndex = -1;
                 this.isPlaying = false;
                 this.isShuffled = false;
+                this.isRepeat = false;
                 this.shuffledIndices = [];
                 this.currentShuffleIndex = -1;
-                
+
                 this.audioPlayer = document.getElementById('audioPlayer');
                 this.songList = document.getElementById('songList');
                 this.playBtn = document.getElementById('playBtn');
                 this.prevBtn = document.getElementById('prevBtn');
                 this.nextBtn = document.getElementById('nextBtn');
                 this.shuffleBtn = document.getElementById('shuffleBtn');
+                this.repeatBtn = document.getElementById('repeatBtn');
                 this.refreshBtn = document.getElementById('refreshBtn');
                 this.volumeSlider = document.getElementById('volumeSlider');
                 this.progressBar = document.getElementById('progressBar');
@@ -644,25 +653,27 @@
                 this.currentSongDisplay = document.getElementById('currentSong');
                 this.loadingMessage = document.getElementById('loadingMessage');
                 this.emptyState = document.getElementById('emptyState');
-                
+                this.searchInput = document.getElementById('searchInput');
+
                 this.initializeEventListeners();
                 this.loadSongs();
-                
+
                 // Configurar volumen inicial
                 this.audioPlayer.volume = 0.7;
             }
-            
+
             initializeEventListeners() {
                 this.playBtn.addEventListener('click', () => this.togglePlay());
                 this.prevBtn.addEventListener('click', () => this.playPrevious());
                 this.nextBtn.addEventListener('click', () => this.playNext());
                 this.shuffleBtn.addEventListener('click', () => this.toggleShuffle());
+                this.repeatBtn.addEventListener('click', () => this.toggleRepeat());
                 this.refreshBtn.addEventListener('click', () => this.loadSongs());
-                
+
                 this.volumeSlider.addEventListener('input', (e) => {
                     this.audioPlayer.volume = e.target.value / 100;
                 });
-                
+
                 this.progressBar.addEventListener('click', (e) => {
                     if (this.audioPlayer.duration) {
                         const rect = this.progressBar.getBoundingClientRect();
@@ -670,25 +681,27 @@
                         this.audioPlayer.currentTime = percent * this.audioPlayer.duration;
                     }
                 });
-                
+
                 this.audioPlayer.addEventListener('timeupdate', () => this.updateProgress());
-                this.audioPlayer.addEventListener('ended', () => this.playNext());
+                this.audioPlayer.addEventListener('ended', () => this.handleSongEnd());
                 this.audioPlayer.addEventListener('loadedmetadata', () => this.updateDuration());
                 this.audioPlayer.addEventListener('play', () => this.updatePlayButton(true));
                 this.audioPlayer.addEventListener('pause', () => this.updatePlayButton(false));
+
+                this.searchInput.addEventListener('input', () => this.handleSearch());
             }
-            
+
             async loadSongs() {
                 this.loadingMessage.style.display = 'block';
                 this.songList.style.display = 'none';
                 this.emptyState.style.display = 'none';
-                
+
                 try {
                     const response = await fetch('/api/songs');
                     this.songs = await response.json();
-                    
+                    this.filteredSongs = this.songs;
                     this.loadingMessage.style.display = 'none';
-                    
+
                     if (this.songs.length === 0) {
                         this.emptyState.style.display = 'block';
                     } else {
@@ -701,59 +714,75 @@
                     this.loadingMessage.textContent = 'Error al cargar las canciones';
                 }
             }
-            
+
             renderSongs() {
                 this.songList.innerHTML = '';
-                
-                this.songs.forEach((song, index) => {
+                this.filteredSongs.forEach((song, index) => {
                     const li = document.createElement('li');
                     li.className = 'song-item';
                     li.innerHTML = `
-                        <div class="song-number">${index + 1}</div>
+                        <div class="song-number">${this.getSongNumber(index)}</div>
                         <div class="song-info">
                             <div class="song-title">${song.title}</div>
-                            <div class="song-details">${this.formatFileSize(song.size)}</div>
+                            <div class="song-details">${song.artist ? song.artist : ''}</div>
                         </div>
                         <div class="song-duration" id="duration-${index}">--:--</div>
                     `;
-                    
-                    li.addEventListener('click', () => this.playSong(index));
+                    li.addEventListener('click', () => this.playSongByFilteredIndex(index));
                     this.songList.appendChild(li);
                 });
+                this.updateActiveStyle();
+                this.updateDurations();
             }
-            
+
+            getSongNumber(filteredIndex) {
+                // Muestra el número real de la canción en la lista original
+                if (!this.filteredSongs.length) return '';
+                const song = this.filteredSongs[filteredIndex];
+                const originalIndex = this.songs.findIndex(s => s.url === song.url);
+                return originalIndex + 1;
+            }
+
+            playSongByFilteredIndex(filteredIndex) {
+                if (filteredIndex >= 0 && filteredIndex < this.filteredSongs.length) {
+                    const song = this.filteredSongs[filteredIndex];
+                    const index = this.songs.findIndex(s => s.url === song.url);
+                    this.playSong(index);
+                }
+            }
+
             playSong(index) {
                 if (index >= 0 && index < this.songs.length) {
                     this.currentSongIndex = index;
                     const song = this.songs[index];
-                    
+
                     this.audioPlayer.src = song.url;
                     this.audioPlayer.play();
-                    
-                    this.currentSongDisplay.textContent = song.title;
+
+                    this.currentSongDisplay.textContent = song.title + (song.artist ? ' - ' + song.artist : '');
                     this.updateActiveStyle();
                     this.updateNavigationButtons();
+                    this.scrollToActiveSong();
                 }
             }
-            
+
             togglePlay() {
                 if (this.currentSongIndex === -1 && this.songs.length > 0) {
                     this.playSong(0);
                     return;
                 }
-                
+
                 if (this.audioPlayer.paused) {
                     this.audioPlayer.play();
                 } else {
                     this.audioPlayer.pause();
                 }
             }
-            
+
             playNext() {
                 if (this.songs.length === 0) return;
-                
+
                 let nextIndex;
-                
                 if (this.isShuffled) {
                     this.currentShuffleIndex++;
                     if (this.currentShuffleIndex >= this.shuffledIndices.length) {
@@ -764,15 +793,13 @@
                 } else {
                     nextIndex = (this.currentSongIndex + 1) % this.songs.length;
                 }
-                
                 this.playSong(nextIndex);
             }
-            
+
             playPrevious() {
                 if (this.songs.length === 0) return;
-                
+
                 let prevIndex;
-                
                 if (this.isShuffled) {
                     this.currentShuffleIndex--;
                     if (this.currentShuffleIndex < 0) {
@@ -783,21 +810,35 @@
                     prevIndex = this.currentSongIndex - 1;
                     if (prevIndex < 0) prevIndex = this.songs.length - 1;
                 }
-                
                 this.playSong(prevIndex);
             }
-            
+
             toggleShuffle() {
                 this.isShuffled = !this.isShuffled;
                 this.shuffleBtn.style.opacity = this.isShuffled ? '1' : '0.7';
                 this.shuffleBtn.textContent = this.isShuffled ? '🔀 Activado' : '🔀 Aleatorio';
-                
+
                 if (this.isShuffled) {
                     this.generateShuffledIndices();
                     this.currentShuffleIndex = this.shuffledIndices.indexOf(this.currentSongIndex);
                 }
             }
-            
+
+            toggleRepeat() {
+                this.isRepeat = !this.isRepeat;
+                this.repeatBtn.style.opacity = this.isRepeat ? '1' : '0.7';
+                this.repeatBtn.textContent = this.isRepeat ? '🔁 Repetir (On)' : '🔁 Repetir';
+            }
+
+            handleSongEnd() {
+                if (this.isRepeat) {
+                    this.audioPlayer.currentTime = 0;
+                    this.audioPlayer.play();
+                } else {
+                    this.playNext();
+                }
+            }
+
             generateShuffledIndices() {
                 this.shuffledIndices = [...Array(this.songs.length).keys()];
                 for (let i = this.shuffledIndices.length - 1; i > 0; i--) {
@@ -805,7 +846,7 @@
                     [this.shuffledIndices[i], this.shuffledIndices[j]] = [this.shuffledIndices[j], this.shuffledIndices[i]];
                 }
             }
-            
+
             updateProgress() {
                 if (this.audioPlayer.duration) {
                     const percent = (this.audioPlayer.currentTime / this.audioPlayer.duration) * 100;
@@ -813,49 +854,87 @@
                     this.currentTime.textContent = this.formatTime(this.audioPlayer.currentTime);
                 }
             }
-            
+
             updateDuration() {
                 this.totalTime.textContent = this.formatTime(this.audioPlayer.duration);
             }
-            
+
             updatePlayButton(isPlaying) {
                 this.isPlaying = isPlaying;
                 this.playBtn.textContent = isPlaying ? '⏸️ Pausar' : '▶️ Reproducir';
             }
-            
+
             updateActiveStyle() {
                 const songItems = document.querySelectorAll('.song-item');
-                songItems.forEach((item, index) => {
-                    item.classList.toggle('active', index === this.currentSongIndex);
+                songItems.forEach((item, idx) => {
+                    // idx es el índice en filteredSongs
+                    const song = this.filteredSongs[idx];
+                    const originalIndex = this.songs.findIndex(s => s.url === song.url);
+                    item.classList.toggle('active', originalIndex === this.currentSongIndex);
                 });
             }
-            
+
             updateNavigationButtons() {
                 const hasSongs = this.songs.length > 0;
                 this.prevBtn.disabled = !hasSongs;
                 this.nextBtn.disabled = !hasSongs;
                 this.shuffleBtn.disabled = !hasSongs;
+                this.repeatBtn.disabled = !hasSongs;
             }
-            
+
             formatTime(seconds) {
                 if (isNaN(seconds)) return '0:00';
                 const mins = Math.floor(seconds / 60);
                 const secs = Math.floor(seconds % 60);
                 return `${mins}:${secs.toString().padStart(2, '0')}`;
             }
-            
-            formatFileSize(bytes) {
-                if (bytes === 0) return '0 Bytes';
-                const k = 1024;
-                const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-                const i = Math.floor(Math.log(bytes) / Math.log(k));
-                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+
+            // Eliminar formatFileSize, ya no se usa
+
+            handleSearch() {
+                const query = this.searchInput.value.trim().toLowerCase();
+                if (!query) {
+                    this.filteredSongs = this.songs;
+                } else {
+                    this.filteredSongs = this.songs.filter(song =>
+                        song.title.toLowerCase().includes(query) ||
+                        (song.artist && song.artist.toLowerCase().includes(query))
+                    );
+                }
+                this.renderSongs();
+            }
+
+            scrollToActiveSong() {
+                setTimeout(() => {
+                    const songItems = document.querySelectorAll('.song-item');
+                    const idx = this.filteredSongs.findIndex(song => {
+                        const originalIndex = this.songs.findIndex(s => s.url === song.url);
+                        return originalIndex === this.currentSongIndex;
+                    });
+                    if (idx >= 0 && songItems[idx]) {
+                        songItems[idx].scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                }, 100);
+            }
+
+            updateDurations() {
+                // Opcional: cargar duración de cada canción si es posible
+                this.filteredSongs.forEach((song, idx) => {
+                    const audio = document.createElement('audio');
+                    audio.src = song.url;
+                    audio.preload = 'metadata';
+                    audio.addEventListener('loadedmetadata', () => {
+                        const duration = this.formatTime(audio.duration);
+                        const durationElem = document.getElementById(`duration-${idx}`);
+                        if (durationElem) durationElem.textContent = duration;
+                    });
+                });
             }
         }
-        
+
         // Inicializar la aplicación
         document.addEventListener('DOMContentLoaded', () => {
-            new SpotifyClone();
+            new SoundWave();
         });
     </script>
 </body>
